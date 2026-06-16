@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using static System.Console;
 
 namespace AppGraZaDuzoZaMaloCLI
@@ -10,7 +6,6 @@ namespace AppGraZaDuzoZaMaloCLI
     class WidokCLI
     {
         public const char ZNAK_ZAKONCZENIA_GRY = 'X';
-
         private KontrolerCLI kontroler;
 
         public WidokCLI(KontrolerCLI kontroler) => this.kontroler = kontroler;
@@ -25,48 +20,35 @@ namespace AppGraZaDuzoZaMaloCLI
             bool sukces = false;
             while (!sukces)
             {
-                Write("Podaj swoją propozycję (lub " + KontrolerCLI.ZNAK_ZAKONCZENIA_GRY + " aby przerwać): ");
+                Write("Podaj swoją propozycję (lub " + ZNAK_ZAKONCZENIA_GRY + " aby zapisać stan i wyjść): ");
                 try
                 {
                     string value = ReadLine().TrimStart().ToUpper();
                     if (value.Length > 0 && value[0].Equals(ZNAK_ZAKONCZENIA_GRY))
                         throw new KoniecGryException();
 
-                    //UWAGA: ponizej może zostać zgłoszony wyjątek 
                     wynik = Int32.Parse(value);
                     sukces = true;
                 }
-                catch (FormatException)
-                {
-                    WriteLine("Podana przez Ciebie wartość nie przypomina liczby! Spróbuj raz jeszcze.");
-                    continue;
-                }
-                catch (OverflowException)
-                {
-                    WriteLine("Przesadziłeś. Podana przez Ciebie wartość jest zła! Spróbuj raz jeszcze.");
-                    continue;
-                }
-                catch (Exception)
-                {
-                    WriteLine("Nieznany błąd! Spróbuj raz jeszcze.");
-                    continue;
-                }
+                catch (FormatException) { WriteLine("To nie jest liczba! Spróbuj raz jeszcze."); }
+                catch (OverflowException) { WriteLine("Liczba jest za duża lub za mała! Spróbuj raz jeszcze."); }
+                catch (KoniecGryException ex) { throw ex; }
+                catch (Exception) { WriteLine("Nieznany błąd! Spróbuj raz jeszcze."); }
             }
             return wynik;
         }
 
         public void OpisGry()
         {
-            WriteLine("Gra w \"Za dużo za mało\"." + Environment.NewLine
-                + "Twoimm zadaniem jest odgadnąć liczbę, którą wylosował komputer." + Environment.NewLine + "Na twoje propozycje komputer odpowiada: za dużo, za mało albo trafiłeś");
+            WriteLine("Gra w \"Za dużo za mało\".\nTwoim zadaniem jest odgadnąć liczbę, którą wylosował komputer.\nNa twoje propozycje komputer odpowiada: za dużo, za mało albo trafiłeś");
         }
 
-        public bool ChceszKontynuowac( string prompt )
+        public bool ChceszKontynuowac(string prompt)
         {
-                Write( prompt );
-                char odp = ReadKey().KeyChar;
-                WriteLine();
-                return (odp == 't' || odp == 'T');
+            Write(prompt);
+            char odp = ReadKey().KeyChar;
+            WriteLine();
+            return (odp == 't' || odp == 'T');
         }
 
         public void HistoriaGry()
@@ -77,36 +59,21 @@ namespace AppGraZaDuzoZaMaloCLI
                 return;
             }
 
-            WriteLine("Nr    Propozycja     Odpowiedź     Czas    Status");
-            WriteLine("=================================================");
+            WriteLine("\nNr   Propozycja      Odpowiedź      Czas      Status");
+            WriteLine("======================================================");
             int i = 1;
-            foreach ( var ruch in kontroler.ListaRuchow)
+            foreach (var ruch in kontroler.ListaRuchow)
             {
-                WriteLine($"{i}     {ruch.Liczba}      {ruch.Wynik}  {ruch.Czas.Second}   {ruch.StatusGry}");
+                string prop = ruch.Liczba?.ToString() ?? "Brak";
+                string wyn = ruch.Wynik?.ToString() ?? "Brak";
+                WriteLine($"{i,-4} {prop,-15} {wyn,-14} {ruch.Czas.ToShortTimeString()}   {ruch.StatusGry}");
                 i++;
             }
+            WriteLine();
         }
 
-        public void KomunikatZaDuzo()
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            WriteLine("Za dużo!");
-            Console.ResetColor();
-        }
-
-        public void KomunikatZaMalo()
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            WriteLine("Za mało!");
-            Console.ResetColor();
-        }
-
-        public void KomunikatTrafiono()
-        {
-            Console.ForegroundColor = ConsoleColor.Green;
-            WriteLine("Trafiono!");
-            Console.ResetColor();
-        }
+        public void KomunikatZaDuzo() { ForegroundColor = ConsoleColor.Red; WriteLine("Za dużo!"); ResetColor(); }
+        public void KomunikatZaMalo() { ForegroundColor = ConsoleColor.Red; WriteLine("Za mało!"); ResetColor(); }
+        public void KomunikatTrafiono() { ForegroundColor = ConsoleColor.Green; WriteLine("Trafiono!"); ResetColor(); }
     }
-
 }
