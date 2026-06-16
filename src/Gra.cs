@@ -1,156 +1,108 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Runtime.Serialization;
 
 namespace GraZaDuzoZaMalo.Model
 {
-    /// <summary>
-    /// Klasa odpowiedzialna za logikę gry w "Za dużo za mało". Dostarcza API gry.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 1. Gra może być w jednym z 3 możliwych statusów: 
-    /// <list type="bullet">
-    /// <item>
-    /// <term><c>WTrakcie</c>
-    /// </term>
-    /// <description> - gracz jeszcze nie odgadł liczby, może podawać swoje propozycje, stan ustawiany w chwili utworzenia gry i może ulec zmianie jedynie w chwili odgadnięcia liczby lub jawnego przerwania gry,
-    /// </description>
-    /// </item> 
-    /// <item>
-    /// <term><c>Zakonczona</c></term>
-    /// <description> - gracz odgadł liczbę, stan ustawiany wyłącznie w wyniku odgadnięcia liczby,</description>
-    /// </item> 
-    /// <item>
-    /// <term><c>Poddana</c></term>
-    /// <description>- gracz przerwał rozgrywkę, stan ustawiany wyłącznie w wyniku jawnego przerwania gry.</description>
-    /// </item>
-    /// </list>
-    /// </para>
-    /// <para>
-    /// W chwili utworzenia obiektu gry losowana jest wartość do odgadnięcia, ustawiany czas rozpoczecia gry oraz gra otrzymuje status <c>WTrakcie</c>.
-    /// </para>
-    /// <para>
-    /// Stan gry (w dowolnym momencie zycia obiektu gry) opisany jest przez:
-    /// a) wylosowaną liczbę, którą należy odgadnąć,
-    /// b) status gry (WTrakcie, Zakonczona, Poddana),
-    /// c) historię ruchów graczagracz przerwał rozgrywke,  odgadującego (tzn. składane propozycje, czasy złożenia propozycji i odpowiedzi komputera).
-    /// </para>
-    /// <para>
-    /// Komputer może udzielić jednej z 3 możliwych odpowiedzi: <c>ZaDuzo</c>, <c>ZaMalo</c>, <c>Trafiony</c>
-    /// </para>
-    /// <para>
-    /// Pojedynczy Ruch
-    /// </para>
-    /// </remarks>
+    [Serializable]
+    [DataContract]
+    public class StanGryData
+    {
+        [DataMember] public int Min { get; set; }
+        [DataMember] public int Max { get; set; }
+        [DataMember] public int LiczbaDoOdgadniecia { get; set; }
+        [DataMember] public Gra.Status StatusGry { get; set; }
+        [DataMember] public TimeSpan SkumulowanyCzas { get; set; }
+        [DataMember] public DateTime CzasRozpoczecia { get; set; }
+        [DataMember] public List<Gra.Ruch> ListaRuchow { get; set; }
+    }
+
     public class Gra
     {
-        /// <summary>
-        /// Górne ograniczenie losowanej liczby, która ma zostać odgadnięta.
-        /// </summary>
-        /// <value>
-        /// Domyślna wartość wynosi 100. Wartość jest ustawiana w konstruktorze i nie może zmienić się podczas życia obiektu gry.
-        /// </value>
         public int MaxLiczbaDoOdgadniecia { get; } = 100;
-
-        /// <summary>
-        /// Dolne ograniczenie losowanej liczby, która ma zostać odgadnięta.
-        /// </summary>
-        /// <value>
-        /// Domyślna wartość wynosi 1. Wartość jest ustawiana w konstruktorze i nie może zmienić się podczas życia obiektu gry.
-        /// </value>
         public int MinLiczbaDoOdgadniecia { get; } = 1;
-
 
         readonly private int liczbaDoOdgadniecia;
 
-
-        /// <summary>
-        /// Typ wyliczeniowy opisujący możliwe statusy gry.
-        /// </summary>
         public enum Status
         {
-            /// <summary>Status gry ustawiany w momencie utworzenia obiektu gry. Zmiana tego statusu mozliwa albo gdy liczba zostanie odgadnieta, albo jawnie przerwana przez gracza.</summary>
             WTrakcie,
-            /// <summary>Status gry ustawiany w momencie odgadnięcia poszukiwanej liczby.</summary>
             Zakonczona,
-            /// <summary>Status gry ustawiany w momencie jawnego przerwania gry przez gracza.</summary>
-            Poddana
+            Poddana,
+            Zawieszona // Dodany status
         };
 
-        /// <summary>
-        /// Właściwość tylko do odczytu opisujaca aktualny status (<see cref="Status"/>) gry.
-        /// </summary>
-        /// <remarks>
-        /// <para>W momencie utworzenia obiektu, uruchomienia konstruktora, zmienna przyjmuje wartość <see cref="Gra.Status.WTrakcie"/>.</para>
-        /// <para>Zmiana wartości zmiennej na <see cref="Gra.Status.Poddana"/> po uruchomieniu metody <see cref="Przerwij"/>.</para>
-        /// <para>Zmiana wartości zmiennej na <see cref="Gra.Status.Zakonczona"/> w metodzie <see cref="Propozycja(int)"/>, po podaniu poprawnej, odgadywanej liczby.</para>
-        /// </remarks>
         public Status StatusGry { get; private set; }
 
-
         private List<Ruch> listaRuchow;
-
         public IReadOnlyList<Ruch> ListaRuchow { get { return listaRuchow.AsReadOnly(); } }
 
-        /// <summary>
-        /// Czas rozpoczęcia gry, ustawiany w momencie utworzenia obiektu gry, w konstruktorze. Nie można go już zmodyfikować podczas życia obiektu.
-        /// </summary>
-        public DateTime CzasRozpoczecia { get; }
+        public DateTime CzasRozpoczecia { get; private set; }
         public DateTime? CzasZakonczenia { get; private set; }
 
-        /// <summary>
-        /// Zwraca aktualny stan gry, od chwili jej utworzenia (wywołania konstruktora) do momentu wywołania tej własciwości.
-        /// </summary>
-        public TimeSpan AktualnyCzasGry => DateTime.Now - CzasRozpoczecia;
-        public TimeSpan CalkowityCzasGry => (StatusGry == Status.WTrakcie) ? AktualnyCzasGry : (TimeSpan)(CzasZakonczenia - CzasRozpoczecia);
+        private TimeSpan skumulowanyCzas = TimeSpan.Zero;
+        private DateTime czasRozpoczeciaAktualnegoSegmentu;
+
+        public TimeSpan AktualnyCzasGry
+        {
+            get
+            {
+                if (StatusGry == Status.WTrakcie)
+                    return skumulowanyCzas + (DateTime.Now - czasRozpoczeciaAktualnegoSegmentu);
+
+                return skumulowanyCzas;
+            }
+        }
+
+        public TimeSpan CalkowityCzasGry => AktualnyCzasGry;
 
         public Gra(int min, int max)
         {
-            if (min >= max)
-                throw new ArgumentException();
-
+            if (min >= max) throw new ArgumentException();
             MinLiczbaDoOdgadniecia = min;
             MaxLiczbaDoOdgadniecia = max;
-
             liczbaDoOdgadniecia = (new Random()).Next(MinLiczbaDoOdgadniecia, MaxLiczbaDoOdgadniecia + 1);
             CzasRozpoczecia = DateTime.Now;
+            czasRozpoczeciaAktualnegoSegmentu = DateTime.Now;
             CzasZakonczenia = null;
             StatusGry = Status.WTrakcie;
-
             listaRuchow = new List<Ruch>();
         }
 
         public Gra() : this(1, 100) { }
 
+        // Konstruktor odtwarzający stan z pliku
+        public Gra(StanGryData stan)
+        {
+            MinLiczbaDoOdgadniecia = stan.Min;
+            MaxLiczbaDoOdgadniecia = stan.Max;
+            liczbaDoOdgadniecia = stan.LiczbaDoOdgadniecia;
+            StatusGry = stan.StatusGry;
+            skumulowanyCzas = stan.SkumulowanyCzas;
+            CzasRozpoczecia = stan.CzasRozpoczecia;
+            listaRuchow = stan.ListaRuchow ?? new List<Ruch>();
 
-        /// <summary>
-        /// Każde zadanie pytania o wynik skutkuje dopisaniem do listy
-        /// </summary>
-        /// <param name="pytanie"></param>
-        /// <returns></returns>
+            if (StatusGry == Status.Zawieszona)
+            {
+                StatusGry = Status.WTrakcie;
+                czasRozpoczeciaAktualnegoSegmentu = DateTime.Now;
+            }
+        }
+
         public Odpowiedz Ocena(int pytanie)
         {
             Odpowiedz odp;
             if (pytanie == liczbaDoOdgadniecia)
             {
                 odp = Odpowiedz.Trafiony;
-                StatusGry = Status.Zakonczona;
-                CzasZakonczenia = DateTime.Now;
+                ZakonczGreSegment(Status.Zakonczona);
                 listaRuchow.Add(new Ruch(pytanie, odp, Status.Zakonczona));
             }
-            else if (pytanie < liczbaDoOdgadniecia)
-                odp = Odpowiedz.ZaMalo;
-            else
-                odp = Odpowiedz.ZaDuzo;
+            else if (pytanie < liczbaDoOdgadniecia) odp = Odpowiedz.ZaMalo;
+            else odp = Odpowiedz.ZaDuzo;
 
-            //dopisz do listy
             if (StatusGry == Status.WTrakcie)
-            {
                 listaRuchow.Add(new Ruch(pytanie, odp, Status.WTrakcie));
-            }
 
             return odp;
         }
@@ -159,29 +111,52 @@ namespace GraZaDuzoZaMalo.Model
         {
             if (StatusGry == Status.WTrakcie)
             {
-                StatusGry = Status.Poddana;
-                CzasZakonczenia = DateTime.Now;
+                ZakonczGreSegment(Status.Poddana);
                 listaRuchow.Add(new Ruch(null, null, Status.WTrakcie));
             }
-
             return liczbaDoOdgadniecia;
         }
 
-
-        // struktury wewnętrzne, pomocnicze
-        public enum Odpowiedz
+        public void Zawies()
         {
-            ZaMalo = -1,
-            Trafiony = 0,
-            ZaDuzo = 1
-        };
+            if (StatusGry == Status.WTrakcie) ZakonczGreSegment(Status.Zawieszona);
+        }
 
+        public StanGryData PobierzStan()
+        {
+            TimeSpan obecnySkumulowany = skumulowanyCzas;
+            if (StatusGry == Status.WTrakcie)
+                obecnySkumulowany += (DateTime.Now - czasRozpoczeciaAktualnegoSegmentu);
+
+            return new StanGryData
+            {
+                Min = this.MinLiczbaDoOdgadniecia,
+                Max = this.MaxLiczbaDoOdgadniecia,
+                LiczbaDoOdgadniecia = this.liczbaDoOdgadniecia,
+                StatusGry = this.StatusGry,
+                SkumulowanyCzas = obecnySkumulowany,
+                CzasRozpoczecia = this.CzasRozpoczecia,
+                ListaRuchow = new List<Ruch>(this.listaRuchow)
+            };
+        }
+
+        private void ZakonczGreSegment(Status nowyStatus)
+        {
+            skumulowanyCzas += (DateTime.Now - czasRozpoczeciaAktualnegoSegmentu);
+            StatusGry = nowyStatus;
+            CzasZakonczenia = DateTime.Now;
+        }
+
+        public enum Odpowiedz { ZaMalo = -1, Trafiony = 0, ZaDuzo = 1 };
+
+        [Serializable]
+        [DataContract]
         public class Ruch
         {
-            public int? Liczba { get; }
-            public Odpowiedz? Wynik { get; }
-            public Status StatusGry { get; }
-            public DateTime Czas { get; }
+            [DataMember] public int? Liczba { get; private set; }
+            [DataMember] public Odpowiedz? Wynik { get; private set; }
+            [DataMember] public Status StatusGry { get; private set; }
+            [DataMember] public DateTime Czas { get; private set; }
 
             public Ruch(int? propozycja, Odpowiedz? odp, Status statusGry)
             {
@@ -191,12 +166,7 @@ namespace GraZaDuzoZaMalo.Model
                 this.Czas = DateTime.Now;
             }
 
-            public override string ToString()
-            {
-                return $"({Liczba}, {Wynik}, {Czas}, {StatusGry})";
-            }
+            public override string ToString() => $"({Liczba}, {Wynik}, {Czas}, {StatusGry})";
         }
-
-
     }
 }
