@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Serialization;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using GraZaDuzoZaMalo.Model;
 using static GraZaDuzoZaMalo.Model.Gra.Odpowiedz;
@@ -15,142 +15,144 @@ namespace AppGraZaDuzoZaMaloCLI
 
         private Gra gra;
         private WidokCLI widok;
+        private CancellationTokenSource ctsAutosave;
 
         public int MinZakres { get; private set; } = 1;
         public int MaxZakres { get; private set; } = 100;
 
-        public IReadOnlyList<Gra.Ruch> ListaRuchow {
-            get
-            { return gra.ListaRuchow;  }
- }
+        public IReadOnlyList<Gra.Ruch> ListaRuchow => gra?.ListaRuchow;
 
         public KontrolerCLI()
         {
-            gra = new Gra();
             widok = new WidokCLI(this);
         }
 
         public void Uruchom()
         {
             widok.OpisGry();
-            while( widok.ChceszKontynuowac("Czy chcesz kontynuować aplikację (t/n)? ") )
+            SprawdzIWznawianieStanu();
+
+            while (widok.ChceszKontynuowac("Czy chcesz zagrać / kontynuować aplikację (t/n)? "))
+            {
                 UruchomRozgrywke();
+            }
+        }
+
+        private void SprawdzIWznawianieStanu()
+        {
+            if (RejestratorStanuXml.CzyIstniejeStan())
+            {
+                StanGryData wczytanyStan = RejestratorStanuXml.OdczytajStan();
+
+                if (wczytanyStan != null)
+                {
+                    widok.CzyscEkran();
+                    Console.WriteLine("--- WYKRYTO ZAPISANĄ GRĘ ---");
+                    Console.WriteLine($"Poprzednia gra trwała aktywnie: {wczytanyStan.SkumulowanyCzas.TotalSeconds:F1} sekund.");
+                    Console.WriteLine($"Oddano strzałów: {wczytanyStan.ListaRuchow.Count}.");
+
+                    if (widok.ChceszKontynuowac("Czy chcesz wznowić poprzednią grę (t/n)? "))
+                    {
+                        gra = new Gra(wczytanyStan);
+                        RejestratorStanuXml.UsunPlikStanu();
+                        Console.WriteLine("Stan przywrócony! Gramy dalej...");
+                        return;
+                    }
+                    else
+                    {
+                        RejestratorStanuXml.UsunPlikStanu();
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Plik zapisu był uszkodzony lub zmanipulowany. Rozpoczęcie nowej gry...");
+                    RejestratorStanuXml.UsunPlikStanu();
+                }
+            }
+            gra = new Gra(MinZakres, MaxZakres);
         }
 
         public void UruchomRozgrywke()
         {
             widok.CzyscEkran();
-            // ustaw zakres do losowania
 
+            if (gra == null || gra.StatusGry != Gra.Status.WTrakcie)
+                gra = new Gra(MinZakres, MaxZakres);
 
-            gra = new Gra(MinZakres, MaxZakres); //może zgłosić ArgumentException
+            RozpocznijAutosave(10);
 
             do
             {
-                //wczytaj propozycję
                 int propozycja = 0;
                 try
                 {
                     propozycja = widok.WczytajPropozycje();
                 }
-                catch( KoniecGryException)
+                catch (KoniecGryException)
                 {
-                    gra.Przerwij();
+                    ZatrzymajAutosave();
+                    gra.Zawies();
+
+                    StanGryData stanDoZapisu = gra.PobierzStan();
+                    if (RejestratorStanuXml.ZapiszStan(stanDoZapisu))
+                        Console.WriteLine("\nGra została zawieszona, a jej stan ZAPISANY pomyślnie na dysku. Do zobaczenia!");
+
+                    return;
                 }
 
-                Console.WriteLine(propozycja);
+                if (gra.StatusGry == Gra.Status.Poddana || gra.StatusGry == Gra.Status.Zawieszona) break;
 
-                if (gra.StatusGry == Gra.Status.Poddana) break;
-
-                //Console.WriteLine( gra.Ocena(propozycja) );
-                //oceń propozycję, break
-                switch( gra.Ocena(propozycja) )
+                switch (gra.Ocena(propozycja))
                 {
-                    case ZaDuzo:
-                        widok.KomunikatZaDuzo();
-                        break;
-                    case ZaMalo:
-                        widok.KomunikatZaMalo();
-                        break;
-                    case Trafiony:
-                        widok.KomunikatTrafiono();
-                        break;
-                    default:
-                        break;
+                    case ZaDuzo: widok.KomunikatZaDuzo(); break;
+                    case ZaMalo: widok.KomunikatZaMalo(); break;
+                    case Trafiony: widok.KomunikatTrafiono(); break;
                 }
+
                 widok.HistoriaGry();
             }
             while (gra.StatusGry == Gra.Status.WTrakcie);
-                      
-            //if StatusGry == Przerwana wypisz poprawną odpowiedź
-            //if StatusGry == Zakończona wypisz statystyki gry
+
+            ZatrzymajAutosave();
+
+            if (gra.StatusGry == Gra.Status.Zakonczona)
+                Console.WriteLine($"\nKONIEC GRY! Całkowity czas aktywnej rozgrywki: {gra.CalkowityCzasGry.TotalSeconds:F2} sekund.");
         }
 
-        ///////////////////////
-
-        public void UstawZakresDoLosowania(ref int min, ref int max)
+        private void RozpocznijAutosave(int interwalSekundy)
         {
+            ctsAutosave = new CancellationTokenSource();
+            Task.Run(async () =>
+            {
+                while (!ctsAutosave.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(interwalSekundy), ctsAutosave.Token);
+                    if (gra != null && gra.StatusGry == Gra.Status.WTrakcie)
+                    {
+                        RejestratorStanuXml.ZapiszStan(gra.PobierzStan());
+                    }
+                }
+            }, ctsAutosave.Token);
+        }
 
+        private void ZatrzymajAutosave()
+        {
+            ctsAutosave?.Cancel();
         }
 
         public int LiczbaProb() => gra.ListaRuchow.Count();
 
         public void ZakonczGre()
         {
-            //np. zapisuje stan gry na dysku w celu późniejszego załadowania
-            //albo dopisuje wynik do Top Score
-            //sprząta pamięć
             gra = null;
-            widok.CzyscEkran(); //komunikat o końcu gry
+            widok.CzyscEkran();
             widok = null;
             System.Environment.Exit(0);
         }
 
-        public void ZakonczRozgrywke()
-        {
-            gra.Przerwij();
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="value"></param>
-        /// <param name="defaultValue"></param>
-        /// <exception cref="KoniecGryException"></exception>
-        /// <exception cref="FormatException"></exception>
-        /// <exception cref="OverflowException"></exception>
-        /// <returns></returns>
-        public int WczytajLiczbeLubKoniec(string value, int defaultValue )
-        {
-            if( string.IsNullOrEmpty(value) )
-                return defaultValue;
-
-            value = value.TrimStart().ToUpper();
-            if ( value.Length>0 && value[0].Equals(ZNAK_ZAKONCZENIA_GRY))
-                throw new KoniecGryException();
-
-            //UWAGA: ponizej może zostać zgłoszony wyjątek 
-            return Int32.Parse(value);
-        }
+        public void ZakonczRozgrywke() => gra.Przerwij();
     }
 
     [Serializable]
-    internal class KoniecGryException : Exception
-    {
-        public KoniecGryException()
-        {
-        }
-
-        public KoniecGryException(string message) : base(message)
-        {
-        }
-
-        public KoniecGryException(string message, Exception innerException) : base(message, innerException)
-        {
-        }
-
-        protected KoniecGryException(SerializationInfo info, StreamingContext context) : base(info, context)
-        {
-        }
-    }
+    public class KoniecGryException : Exception { }
 }
